@@ -61,10 +61,10 @@ function matchRecipe(recipe, ingredients) {
 }
 
 const DAYS = ["一","二","三","四","五","六","日"];
-function getWeekDates() {
+function getWeekDates(offset = 0) {
   const dow = TODAY.getDay();
   const monday = new Date(TODAY);
-  monday.setDate(TODAY.getDate() - (dow === 0 ? 6 : dow - 1));
+  monday.setDate(TODAY.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday); d.setDate(monday.getDate() + i); return d;
   });
@@ -126,8 +126,17 @@ export default function App() {
   const [planModal, setPlanModal] = useState(null); // { key, type }
   const [planInput, setPlanInput] = useState("");
   const [showRecipePicker, setShowRecipePicker] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
 
-  const weekDates = getWeekDates();
+  const weekDates = getWeekDates(weekOffset);
+  const weekLabel = useMemo(() => {
+    const first = weekDates[0], last = weekDates[6];
+    const range = `${first.getMonth()+1}月${first.getDate()}日 - ${last.getMonth()+1}月${last.getDate()}日`;
+    if (weekOffset === 0) return `本周 · ${range}`;
+    if (weekOffset === -1) return `上周 · ${range}`;
+    if (weekOffset === 1) return `下周 · ${range}`;
+    return range;
+  }, [weekDates, weekOffset]);
 
   // Computed
   const expiry = (inDate, shelfDays) => shelfDays ? addDays(inDate, parseInt(shelfDays)) : null;
@@ -520,7 +529,7 @@ export default function App() {
 
       {/* ── Tabs ── */}
       <div style={{ display:"flex", gap:8, marginBottom:"1.5rem" }}>
-        {[["fridge","冰箱食材"],["plan","本周菜谱"],["recipes","菜谱库"]].map(([k,l]) => (
+        {[["fridge","冰箱食材"],["plan","每周菜谱"],["recipes","菜谱库"]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={s.tab(k)}>{l}</button>
         ))}
       </div>
@@ -600,20 +609,43 @@ export default function App() {
       {/* ══ PLAN ══ */}
       {tab === "plan" && (
         <div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6, marginBottom:"1rem" }}>
+          {/* Week nav */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem" }}>
+            <button onClick={() => setWeekOffset(w => w-1)} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>‹</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:14, fontWeight:600, color:"#1e293b" }}>{weekLabel}</div>
+              {weekOffset !== 0 && (
+                <button onClick={() => setWeekOffset(0)} style={{ fontSize:11, color:"#6366f1", background:"none", border:"none", cursor:"pointer", marginTop:2, padding:0 }}>回到本周</button>
+              )}
+            </div>
+            <button onClick={() => setWeekOffset(w => w+1)} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>›</button>
+          </div>
+          {/* Day list */}
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:"1.5rem" }}>
             {weekDates.map((dt, i) => {
               const key = toDateStr(dt);
               const isToday = dt.getTime() === TODAY.getTime();
               const lunch = mealPlan[key+"_l"] || "";
               const dinner = mealPlan[key+"_d"] || "";
               return (
-                <div key={i} style={{ background:"#fff", border:`0.5px solid ${isToday?"#6366f1":"#e2e8f0"}`, borderRadius:10, padding:"8px 4px", minHeight:130 }}>
-                  <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", marginBottom:2 }}>周{DAYS[i]}</div>
-                  <div style={{ fontSize:13, fontWeight:500, color:"#1e293b", textAlign:"center", marginBottom:6 }}>{dt.getDate()}日</div>
-                  <div style={{ fontSize:10, color:"#94a3b8", textAlign:"center" }}>午</div>
-                  <div onClick={() => { setPlanModal({key:key+"_l",type:"l"}); setPlanInput(lunch); }} style={{ fontSize:11, padding:"3px 2px", borderRadius:4, marginBottom:6, background:lunch?"#f0fdf4":"#f8fafc", color:lunch?"#16a34a":"#94a3b8", cursor:"pointer", textAlign:"center", minHeight:22, lineHeight:"16px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{lunch||"+"}</div>
-                  <div style={{ fontSize:10, color:"#94a3b8", textAlign:"center" }}>晚</div>
-                  <div onClick={() => { setPlanModal({key:key+"_d",type:"d"}); setPlanInput(dinner); }} style={{ fontSize:11, padding:"3px 2px", borderRadius:4, background:dinner?"#f0fdf4":"#f8fafc", color:dinner?"#16a34a":"#94a3b8", cursor:"pointer", textAlign:"center", minHeight:22, lineHeight:"16px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{dinner||"+"}</div>
+                <div key={i} style={{ display:"flex", alignItems:"stretch", gap:10, background:"#fff", border:`0.5px solid ${isToday?"#6366f1":"#e2e8f0"}`, borderRadius:12, padding:"8px 10px" }}>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", width:46, flexShrink:0, borderRight:"0.5px solid #f1f5f9", paddingRight:10 }}>
+                    <div style={{ fontSize:11, color: isToday?"#6366f1":"#94a3b8", fontWeight: isToday?600:400 }}>周{DAYS[i]}</div>
+                    <div style={{ fontSize:18, fontWeight:600, color: isToday?"#4338ca":"#1e293b", lineHeight:"22px" }}>{dt.getDate()}</div>
+                    {isToday && <div style={{ fontSize:9, color:"#6366f1" }}>今天</div>}
+                  </div>
+                  <div style={{ flex:1, display:"flex", gap:8 }}>
+                    <div onClick={() => { setPlanModal({key:key+"_l",type:"l"}); setPlanInput(lunch); }}
+                      style={{ flex:1, borderRadius:8, padding:"6px 10px", cursor:"pointer", background:lunch?"#f0fdf4":"#f8fafc", minWidth:0 }}>
+                      <div style={{ fontSize:10, color:"#94a3b8", marginBottom:2 }}>午餐</div>
+                      <div style={{ fontSize:13, fontWeight: lunch?500:400, color:lunch?"#16a34a":"#cbd5e1", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{lunch||"+ 添加"}</div>
+                    </div>
+                    <div onClick={() => { setPlanModal({key:key+"_d",type:"d"}); setPlanInput(dinner); }}
+                      style={{ flex:1, borderRadius:8, padding:"6px 10px", cursor:"pointer", background:dinner?"#f0fdf4":"#f8fafc", minWidth:0 }}>
+                      <div style={{ fontSize:10, color:"#94a3b8", marginBottom:2 }}>晚餐</div>
+                      <div style={{ fontSize:13, fontWeight: dinner?500:400, color:dinner?"#16a34a":"#cbd5e1", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{dinner||"+ 添加"}</div>
+                    </div>
+                  </div>
                 </div>
               );
             })}

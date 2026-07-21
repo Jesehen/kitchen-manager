@@ -61,13 +61,35 @@ function matchRecipe(recipe, ingredients) {
 }
 
 const DAYS = ["一","二","三","四","五","六","日"];
+function mondayOf(date) {
+  const dow = date.getDay();
+  const monday = new Date(date);
+  monday.setDate(date.getDate() - (dow === 0 ? 6 : dow - 1));
+  return monday;
+}
 function getWeekDates(offset = 0) {
-  const dow = TODAY.getDay();
-  const monday = new Date(TODAY);
-  monday.setDate(TODAY.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
+  const monday = mondayOf(TODAY);
+  monday.setDate(monday.getDate() + offset * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday); d.setDate(monday.getDate() + i); return d;
   });
+}
+// ISO-8601 week number (year belongs to the Thursday of that week)
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3); // Thursday of this week
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const firstThursdayDay = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstThursdayDay + 3);
+  const week = 1 + Math.round((d - firstThursday) / (7 * 86400000));
+  return { year: d.getUTCFullYear(), week };
+}
+// how many weeks (signed) is dateStr's week away from the current week
+function weekOffsetFromDate(dateStr) {
+  const targetMonday = mondayOf(new Date(dateStr));
+  const curMonday = mondayOf(TODAY);
+  return Math.round((targetMonday - curMonday) / (7 * 86400000));
 }
 
 function useLocalStorage(key, init) {
@@ -127,15 +149,15 @@ export default function App() {
   const [planInput, setPlanInput] = useState("");
   const [showRecipePicker, setShowRecipePicker] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [jumpOpen, setJumpOpen] = useState(false);
 
   const weekDates = getWeekDates(weekOffset);
   const weekLabel = useMemo(() => {
     const first = weekDates[0], last = weekDates[6];
     const range = `${first.getMonth()+1}月${first.getDate()}日 - ${last.getMonth()+1}月${last.getDate()}日`;
-    if (weekOffset === 0) return `本周 · ${range}`;
-    if (weekOffset === -1) return `上周 · ${range}`;
-    if (weekOffset === 1) return `下周 · ${range}`;
-    return range;
+    const { year, week } = getISOWeek(first);
+    const rel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : weekOffset === 1 ? "下周" : null;
+    return `${year}年第${week}周${rel ? " · "+rel : ""} · ${range}`;
   }, [weekDates, weekOffset]);
 
   // Computed
@@ -610,16 +632,26 @@ export default function App() {
       {tab === "plan" && (
         <div>
           {/* Week nav */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem" }}>
-            <button onClick={() => setWeekOffset(w => w-1)} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>‹</button>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"0.5rem" }}>
+            <button onClick={() => { setWeekOffset(w => w-1); setJumpOpen(false); }} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>‹</button>
             <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:14, fontWeight:600, color:"#1e293b" }}>{weekLabel}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, justifyContent:"center" }}>
+                <div style={{ fontSize:14, fontWeight:600, color:"#1e293b" }}>{weekLabel}</div>
+                <button onClick={() => setJumpOpen(v => !v)} title="跳转到指定周" style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#6366f1", padding:0, lineHeight:1 }}>📅</button>
+              </div>
               {weekOffset !== 0 && (
-                <button onClick={() => setWeekOffset(0)} style={{ fontSize:11, color:"#6366f1", background:"none", border:"none", cursor:"pointer", marginTop:2, padding:0 }}>回到本周</button>
+                <button onClick={() => { setWeekOffset(0); setJumpOpen(false); }} style={{ fontSize:11, color:"#6366f1", background:"none", border:"none", cursor:"pointer", marginTop:2, padding:0 }}>回到本周</button>
               )}
             </div>
-            <button onClick={() => setWeekOffset(w => w+1)} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>›</button>
+            <button onClick={() => { setWeekOffset(w => w+1); setJumpOpen(false); }} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>›</button>
           </div>
+          {jumpOpen && (
+            <div style={{ display:"flex", justifyContent:"center", marginBottom:"1rem" }}>
+              <input type="date" defaultValue={toDateStr(weekDates[0])} autoFocus
+                onChange={e => { if (e.target.value) { setWeekOffset(weekOffsetFromDate(e.target.value)); setJumpOpen(false); } }}
+                style={{ padding:"6px 10px", borderRadius:8, border:"0.5px solid #6366f1", fontSize:13 }} />
+            </div>
+          )}
           {/* Day list */}
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:"1.5rem" }}>
             {weekDates.map((dt, i) => {

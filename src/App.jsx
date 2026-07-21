@@ -157,7 +157,7 @@ export default function App() {
     const range = `${first.getMonth()+1}月${first.getDate()}日 - ${last.getMonth()+1}月${last.getDate()}日`;
     const { year, week } = getISOWeek(first);
     const rel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : weekOffset === 1 ? "下周" : null;
-    return `${year}年第${week}周${rel ? " · "+rel : ""} · ${range}`;
+    return { main: `${year}年第${week}周`, sub: rel ? `${rel} · ${range}` : range };
   }, [weekDates, weekOffset]);
 
   // Computed
@@ -632,18 +632,19 @@ export default function App() {
       {tab === "plan" && (
         <div>
           {/* Week nav */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"0.5rem" }}>
-            <button onClick={() => { setWeekOffset(w => w-1); setJumpOpen(false); }} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>‹</button>
-            <div style={{ textAlign:"center" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, marginBottom:"0.5rem" }}>
+            <button onClick={() => { setWeekOffset(w => w-1); setJumpOpen(false); }} style={{ flexShrink:0, width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>‹</button>
+            <div style={{ textAlign:"center", flex:1, minWidth:0 }}>
               <div style={{ display:"flex", alignItems:"center", gap:6, justifyContent:"center" }}>
-                <div style={{ fontSize:14, fontWeight:600, color:"#1e293b" }}>{weekLabel}</div>
-                <button onClick={() => setJumpOpen(v => !v)} title="跳转到指定周" style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#6366f1", padding:0, lineHeight:1 }}>📅</button>
+                <div style={{ fontSize:14, fontWeight:600, color:"#1e293b", whiteSpace:"nowrap" }}>{weekLabel.main}</div>
+                <button onClick={() => setJumpOpen(v => !v)} title="跳转到指定周" style={{ flexShrink:0, background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#6366f1", padding:0, lineHeight:1 }}>📅</button>
               </div>
+              <div style={{ fontSize:11, color:"#94a3b8", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{weekLabel.sub}</div>
               {weekOffset !== 0 && (
                 <button onClick={() => { setWeekOffset(0); setJumpOpen(false); }} style={{ fontSize:11, color:"#6366f1", background:"none", border:"none", cursor:"pointer", marginTop:2, padding:0 }}>回到本周</button>
               )}
             </div>
-            <button onClick={() => { setWeekOffset(w => w+1); setJumpOpen(false); }} style={{ width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>›</button>
+            <button onClick={() => { setWeekOffset(w => w+1); setJumpOpen(false); }} style={{ flexShrink:0, width:36, height:36, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:16, cursor:"pointer" }}>›</button>
           </div>
           {jumpOpen && (
             <div style={{ display:"flex", justifyContent:"center", marginBottom:"1rem" }}>

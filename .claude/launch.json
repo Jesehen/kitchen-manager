@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "kitchen-app-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "D:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
       "port": 5173
     }
   ]

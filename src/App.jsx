@@ -117,6 +117,14 @@ export default function App() {
   const [nextIngId, setNextIngId] = useLocalStorage("kit_nii", 1);
   const [nextRecId, setNextRecId] = useLocalStorage("kit_nri", 1);
 
+  // Backup / cloud sync
+  const [syncToken, setSyncToken] = useLocalStorage("kit_sync_token", "");
+  const [syncGistId, setSyncGistId] = useLocalStorage("kit_sync_gistid", "");
+  const [backupModal, setBackupModal] = useState(false);
+  const [syncTokenInput, setSyncTokenInput] = useState("");
+  const [syncStatus, setSyncStatus] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+
   // Fridge state
   const [ingFilter, setIngFilter] = useState("all");
   const [ingName, setIngName] = useState("");
@@ -263,6 +271,109 @@ export default function App() {
     setMealPlan(prev => ({ ...prev, [planModal.key]: recipeName }));
     setShowRecipePicker(false); setPlanModal(null);
   }
+
+  // ── Backup / Cloud Sync ──
+  const GIST_DESC = "kitchen-manager-sync-v1";
+  const GIST_FILE = "kitchen_manager_backup.json";
+
+  function buildBackupBundle() {
+    return { v: 1, updated: Date.now(), ingredients, recipes, mealPlan, allTags, nextIngId, nextRecId };
+  }
+  function applyBackupBundle(obj) {
+    setIngredients(obj.ingredients || []);
+    setRecipes(obj.recipes || []);
+    setMealPlan(obj.mealPlan || {});
+    setAllTags(obj.allTags || []);
+    setNextIngId(obj.nextIngId || 1);
+    setNextRecId(obj.nextRecId || 1);
+  }
+  function doExport() {
+    const blob = new Blob([JSON.stringify(buildBackupBundle())], { type: "application/json" });
+    const a = Object.assign(document.createElement("a"), {
+      href: URL.createObjectURL(blob), download: `厨房管理器备份_${toDateStr(TODAY)}.json`,
+    });
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function doImport(inp) {
+    const file = inp.files[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      try {
+        const obj = JSON.parse(ev.target.result);
+        if (!obj.ingredients || !obj.recipes) throw 0;
+        if (!confirm("导入备份将覆盖当前所有数据，确定吗？")) return;
+        applyBackupBundle(obj);
+        setSyncStatus("✅ 导入成功");
+      } catch { alert("文件格式不正确"); }
+    };
+    r.readAsText(file); inp.value = "";
+  }
+  async function gistApiRaw(token, method, path, body) {
+    if (!token) return null;
+    try {
+      const r = await fetch("https://api.github.com" + path, {
+        method,
+        headers: { Authorization: "token " + token, "Content-Type": "application/json", Accept: "application/vnd.github.v3+json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }
+  const gistApi = (method, path, body) => gistApiRaw(syncToken, method, path, body);
+
+  async function findOrCreateGist(token) {
+    const gists = await gistApiRaw(token, "GET", "/gists?per_page=100");
+    if (!Array.isArray(gists)) return null;
+    const existing = gists.find(g => g.description === GIST_DESC);
+    if (existing) return existing.id;
+    const created = await gistApiRaw(token, "POST", "/gists", { description: GIST_DESC, public: false, files: { [GIST_FILE]: { content: "{}" } } });
+    return created?.id || null;
+  }
+  async function setupSync() {
+    const token = syncTokenInput.trim();
+    if (!token) { alert("请输入 GitHub Token"); return; }
+    setSyncBusy(true); setSyncStatus("连接中…");
+    try {
+      const who = await gistApiRaw(token, "GET", "/user");
+      if (!who) throw new Error("Token 无效");
+      const gistId = await findOrCreateGist(token);
+      if (!gistId) throw new Error("Gist 创建失败（Token 需要 gist 权限）");
+      setSyncToken(token); setSyncGistId(gistId);
+      await gistApiRaw(token, "PATCH", "/gists/" + gistId, { files: { [GIST_FILE]: { content: JSON.stringify(buildBackupBundle()) } } });
+      setSyncStatus("✅ 已连接并完成首次同步");
+    } catch (e) {
+      setSyncStatus("❌ " + e.message);
+    } finally { setSyncBusy(false); }
+  }
+  function disconnectSync() {
+    if (!confirm("断开云端同步？（不会删除云端已有的备份）")) return;
+    setSyncToken(""); setSyncGistId(""); setSyncTokenInput(""); setSyncStatus("");
+  }
+  async function syncPush() {
+    if (!syncToken || !syncGistId) return;
+    setSyncBusy(true); setSyncStatus("上传中…");
+    const ok = await gistApi("PATCH", "/gists/" + syncGistId, { files: { [GIST_FILE]: { content: JSON.stringify(buildBackupBundle()) } } });
+    setSyncStatus(ok ? "✅ 已上传到云端" : "❌ 上传失败");
+    setSyncBusy(false);
+  }
+  async function syncPull() {
+    if (!syncToken || !syncGistId) return;
+    setSyncBusy(true); setSyncStatus("下载中…");
+    try {
+      const gist = await gistApi("GET", "/gists/" + syncGistId);
+      const raw = gist?.files?.[GIST_FILE]?.content;
+      if (!raw || raw === "{}") { setSyncStatus("云端暂无数据"); setSyncBusy(false); return; }
+      if (!confirm("从云端拉取数据将覆盖本机当前数据，确定吗？")) { setSyncBusy(false); return; }
+      applyBackupBundle(JSON.parse(raw));
+      setSyncStatus("✅ 已从云端拉取最新数据");
+    } catch { setSyncStatus("❌ 拉取失败"); }
+    setSyncBusy(false);
+  }
+  const backupSizeKB = useMemo(() => {
+    try { return (new Blob([JSON.stringify(buildBackupBundle())]).size / 1024).toFixed(1); }
+    catch { return "0"; }
+  }, [ingredients, recipes, mealPlan, allTags]);
 
   // ── Analysis ──
   const analysisResult = useMemo(() => {
@@ -549,11 +660,68 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Backup / Sync Modal ── */}
+      {backupModal && (
+        <div style={modalBg}>
+          <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:440, maxHeight:"88vh", overflowY:"auto" }}>
+            <div style={{ padding:"1.25rem 1.5rem", borderBottom:"0.5px solid #e2e8f0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontSize:16, fontWeight:500 }}>💽 数据备份与同步</span>
+              <button onClick={() => setBackupModal(false)} style={{ background:"none", border:"none", fontSize:20, color:"#94a3b8", cursor:"pointer" }}>✕</button>
+            </div>
+            <div style={{ padding:"1rem 1.5rem", display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ fontSize:12, color:"#94a3b8", lineHeight:1.6 }}>
+                所有数据只存在本机浏览器里，清缓存、换设备都可能丢失。建议定期导出备份，或连接 GitHub 账号做云端同步。
+              </div>
+
+              {/* Local backup */}
+              <div style={s.card}>
+                <div style={{ fontSize:13, fontWeight:500, color:"#1e293b", marginBottom:4 }}>本地备份</div>
+                <div style={{ fontSize:12, color:"#94a3b8", marginBottom:10 }}>当前数据约 {backupSizeKB} KB</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={doExport} style={{ flex:1, padding:"9px", borderRadius:8, border:"0.5px solid #6366f1", background:"#eef2ff", color:"#4338ca", fontSize:13, cursor:"pointer" }}>📤 导出备份</button>
+                  <label style={{ flex:1, padding:"9px", borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", color:"#64748b", fontSize:13, cursor:"pointer", textAlign:"center" }}>
+                    📥 导入备份
+                    <input type="file" accept=".json" style={{ display:"none" }} onChange={e => doImport(e.target)} />
+                  </label>
+                </div>
+              </div>
+
+              {/* Cloud sync */}
+              <div style={s.card}>
+                <div style={{ fontSize:13, fontWeight:500, color:"#1e293b", marginBottom:4 }}>☁️ GitHub 云端同步</div>
+                {!syncToken ? (
+                  <>
+                    <div style={{ fontSize:12, color:"#94a3b8", marginBottom:10, lineHeight:1.6 }}>
+                      粘贴一个有 gist 权限的 GitHub Token，数据会同步到你自己账号下的私密 Gist。Token 只保存在本机浏览器。
+                    </div>
+                    <input value={syncTokenInput} onChange={e=>setSyncTokenInput(e.target.value)} type="password" placeholder="粘贴 GitHub Token…" style={{ ...s.input, marginBottom:8 }} />
+                    <button onClick={setupSync} disabled={syncBusy} style={{ width:"100%", padding:"9px", borderRadius:8, border:"none", background:"#4338ca", color:"#fff", fontSize:13, cursor:"pointer", opacity:syncBusy?0.6:1 }}>
+                      {syncBusy ? "连接中…" : "连接并同步"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize:12, color:"#16a34a", marginBottom:10 }}>✓ 已连接云端同步</div>
+                    <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                      <button onClick={syncPush} disabled={syncBusy} style={{ flex:1, padding:"9px", borderRadius:8, border:"0.5px solid #6366f1", background:"#eef2ff", color:"#4338ca", fontSize:13, cursor:"pointer", opacity:syncBusy?0.6:1 }}>⬆ 上传到云端</button>
+                      <button onClick={syncPull} disabled={syncBusy} style={{ flex:1, padding:"9px", borderRadius:8, border:"0.5px solid #6366f1", background:"#eef2ff", color:"#4338ca", fontSize:13, cursor:"pointer", opacity:syncBusy?0.6:1 }}>⬇ 从云端拉取</button>
+                    </div>
+                    <button onClick={disconnectSync} style={{ width:"100%", padding:"8px", borderRadius:8, border:"0.5px solid #e2e8f0", background:"transparent", color:"#94a3b8", fontSize:12, cursor:"pointer" }}>断开同步</button>
+                  </>
+                )}
+                {syncStatus && <div style={{ fontSize:12, color:"#64748b", marginTop:8, textAlign:"center" }}>{syncStatus}</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Tabs ── */}
-      <div style={{ display:"flex", gap:8, marginBottom:"1.5rem" }}>
+      <div style={{ display:"flex", gap:8, marginBottom:"1.5rem", alignItems:"center" }}>
         {[["fridge","冰箱食材"],["plan","每周菜谱"],["recipes","菜谱库"]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={s.tab(k)}>{l}</button>
         ))}
+        <button onClick={() => setBackupModal(true)} title="数据备份与同步" style={{ marginLeft:"auto", width:34, height:34, borderRadius:8, border:"0.5px solid #e2e8f0", background:"#fff", fontSize:15, cursor:"pointer" }}>💽</button>
       </div>
 
       {/* ══ FRIDGE ══ */}
